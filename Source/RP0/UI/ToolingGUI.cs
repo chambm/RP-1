@@ -610,7 +610,7 @@ namespace RP0
                         targetType = ToolingPartResizer.PickRfType(_rowPawTarget, leaf.Sources);
                         tip = $"Refit {_rowPawTarget.partInfo?.title} to {targetType} at d={values[0]:F3}m, L={values[1]:F3}m";
                     }
-                    if (GUILayout.Button(new GUIContent("Refit", tip), HighLogic.Skin.button, GUILayout.Width(60), GUILayout.Height(20)))
+                    if (GUILayout.Button(new GUIContent("Refit", tip), HighLogic.Skin.button, GUILayout.Width(60), GUILayout.Height(20)) && targetType != null)
                         ToolingPartResizer.Resize(_rowPawTarget, values[0], values[1], targetType);
                     GUI.enabled = prev;
                 }
