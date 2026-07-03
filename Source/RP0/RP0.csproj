@@ -216,6 +216,7 @@
     <Compile Include="Tooling\ToolingDefinition.cs" />
     <Compile Include="Tooling\ToolingScenario.cs" />
     <Compile Include="Tooling\ModuleToolingPTank.cs" />
+    <Compile Include="Tooling\ModuleToolingSpine.cs" />
     <Compile Include="UI\TooltipController_TextFunc.cs" />
     <Compile Include="UpgradeScripts\v2_14_RemovePayload.cs" />
     <Compile Include="UpgradeScripts\v3_0_ACRnD.cs" />
