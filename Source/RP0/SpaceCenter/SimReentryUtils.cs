@@ -89,6 +89,13 @@ namespace RP0
                     error = "Apoapsis is below the entry interface; the vessel never reaches it.";
                     return false;
                 }
+                if (ra > body.sphereOfInfluence)
+                {
+                    // Not clamped the way a parking orbit is, because the point of this mode is to
+                    // reach real return speeds - but an apoapsis outside the SOI is not an orbit.
+                    error = "Apoapsis is outside the sphere of influence; use a hyperbolic arrival instead.";
+                    return false;
+                }
                 sma = (ra + rp) * 0.5d;
                 ecc = (ra - rp) / (ra + rp);
             }
