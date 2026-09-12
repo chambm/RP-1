@@ -1288,6 +1288,30 @@ namespace RP0
             yield return new WaitForEndOfFrame();
 
             CelestialBody body = simParams.SimulationBody;
+            if (simParams.SimulateReentry)
+            {
+                if (SimReentryUtils.TryComputeEntry(body, simParams.SimOrbitPe, simParams.SimOrbitAp,
+                                                    simParams.SimEntryVInf, simParams.SimEntryAltitude,
+                                                    simParams.SimEntryLeadTime,
+                                                    out SimReentryUtils.EntryState entry, out string entryError))
+                {
+                    RP0Debug.Log($"Moving vessel to reentry trajectory. {body.bodyName}: Pe {simParams.SimOrbitPe:N0}m, " +
+                                 $"ecc {entry.Ecc:N4}, entering at {entry.EntrySpeed:N0}m/s, FPA {entry.EntryFPA:N2}deg");
+                    FlightGlobals.fetch.SetShipOrbit(body.flightGlobalsIndex, entry.Ecc, entry.SMA, simParams.SimInclination,
+                                                     simParams.SimLAN, entry.MeanAnomaly, simParams.SimArgPe, 0.0);
+                    FloatingOrigin.ResetTerrainShaderOffset();
+                    ScreenMessages.PostScreenMessage($"Entry interface in {simParams.SimEntryLeadTime:N0}s at " +
+                                                     $"{entry.EntrySpeed:N0} m/s, {entry.EntryFPA:N2} deg flight path angle",
+                                                     8f, ScreenMessageStyle.UPPER_CENTER);
+                }
+                else
+                {
+                    RP0Debug.LogError($"Could not build reentry trajectory: {entryError}");
+                    ScreenMessages.PostScreenMessage($"Could not build reentry trajectory: {entryError}", 8f, ScreenMessageStyle.UPPER_CENTER);
+                }
+                yield break;
+            }
+
             if (simParams.SimOrbitAp == 0 && simParams.SimOrbitPe == 0)
             {
                 double sma = simParams.SimOrbitAltitude + body.Radius;

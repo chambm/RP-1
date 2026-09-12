@@ -265,6 +265,8 @@
     <Compile Include="Persistence\GUIPosition.cs" />
     <Compile Include="Persistence\KCTVesselData.cs" />
     <Compile Include="SpaceCenter\SimulationParams.cs" />
+    <Compile Include="SpaceCenter\SimReentryUtils.cs" />
+    <Compile Include="SpaceCenter\ReentryTelemetryLogger.cs" />
     <Compile Include="Utilities\ECMHelper.cs" />
     <Compile Include="SpaceCenter\Projects\ISpaceCenterProject.cs" />
     <Compile Include="SpaceCenter\Projects\VesselProject.cs" />

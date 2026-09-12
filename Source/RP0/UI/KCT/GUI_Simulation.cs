@@ -14,8 +14,12 @@ namespace RP0
         private static Dictionary<CelestialBody, List<CelestialBody>> _bodyChooserChildren;
 
         private static string _sOrbitAlt = "", _sOrbitPe = "", _sOrbitAp = "", _sOrbitInc = "", _sOrbitLAN = "", _sOrbitMNA = "", _sOrbitArgPe = "", _UTString = "", _sDelay = "0";
+        private static string _sEntryAlt = "", _sVInf = "", _sLeadTime = "30";
         private static bool _fromCurrentUT = true;
         private static bool _circOrbit = true;
+        private static bool _reentryMode = false;
+        private static bool _hyperbolicArrival = false;
+        private static bool _logReentryTelemetry = false;
 
         public static void DrawSimulationWindow(int windowID)
         {
@@ -82,31 +86,56 @@ namespace RP0
             }
             if (simParams.SimulationBody != Planetarium.fetch.Home || simParams.SimulateInOrbit)
             {
-                _circOrbit = GUILayout.Toggle(_circOrbit, " Circular");
-                if (_circOrbit)
+                if (simParams.SimulationBody.atmosphere)
                 {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Orbit Altitude (km): ");
-                    _sOrbitAlt = GUILayout.TextField(_sOrbitAlt, GUILayout.Width(100));
-                    GUILayout.EndHorizontal();
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Min: " + simParams.SimulationBody.atmosphereDepth / 1000 + "km");
-                    GUILayout.Label("Max: " + Math.Floor((simParams.SimulationBody.sphereOfInfluence - simParams.SimulationBody.Radius) / 1000) + "km");
-                    GUILayout.EndHorizontal();
+                    bool wasReentry = _reentryMode;
+                    _reentryMode = GUILayout.Toggle(_reentryMode, new GUIContent(" Reentry",
+                        "Start on an arriving trajectory at the entry interface instead of a parking orbit. " +
+                        "Periapsis may be inside the atmosphere and the arrival may be hyperbolic."));
+                    if (_reentryMode != wasReentry)
+                        _simulationConfigPosition.height = 1;
                 }
                 else
                 {
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Orbit Periapsis (km): ");
-                    _sOrbitPe = GUILayout.TextField(_sOrbitPe, GUILayout.Width(100));
-                    GUILayout.EndHorizontal();
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Orbit Apoapsis (km): ");
-                    _sOrbitAp = GUILayout.TextField(_sOrbitAp, GUILayout.Width(100));
-                    GUILayout.EndHorizontal();
+                    _reentryMode = false;
+                }
+
+                if (_reentryMode)
+                {
+                    DrawReentryConfig(simParams.SimulationBody);
+                }
+                else
+                {
+                    _circOrbit = GUILayout.Toggle(_circOrbit, " Circular");
+                    if (_circOrbit)
+                    {
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label("Orbit Altitude (km): ");
+                        _sOrbitAlt = GUILayout.TextField(_sOrbitAlt, GUILayout.Width(100));
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label("Min: " + simParams.SimulationBody.atmosphereDepth / 1000 + "km");
+                        GUILayout.Label("Max: " + Math.Floor((simParams.SimulationBody.sphereOfInfluence - simParams.SimulationBody.Radius) / 1000) + "km");
+                        GUILayout.EndHorizontal();
+                    }
+                    else
+                    {
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label("Orbit Periapsis (km): ");
+                        _sOrbitPe = GUILayout.TextField(_sOrbitPe, GUILayout.Width(100));
+                        GUILayout.EndHorizontal();
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label("Orbit Apoapsis (km): ");
+                        _sOrbitAp = GUILayout.TextField(_sOrbitAp, GUILayout.Width(100));
+                        GUILayout.EndHorizontal();
+                    }
                 }
 
                 if (!simParams.SimulateInOrbit) simParams.SimulateInOrbit = true;
+            }
+            else
+            {
+                _reentryMode = false;
             }
 
             if (simParams.SimulateInOrbit)
@@ -126,10 +155,14 @@ namespace RP0
                 _sOrbitLAN = GUILayout.TextField(_sOrbitLAN, GUILayout.Width(50));
                 GUILayout.EndHorizontal();
 
-                GUILayout.BeginHorizontal();
-                GUILayout.Label("Mean Anomaly (radians): ");
-                _sOrbitMNA = GUILayout.TextField(_sOrbitMNA, GUILayout.Width(50));
-                GUILayout.EndHorizontal();
+                if (!_reentryMode)
+                {
+                    // In reentry mode the mean anomaly is derived from the entry interface and lead time.
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label("Mean Anomaly (radians): ");
+                    _sOrbitMNA = GUILayout.TextField(_sOrbitMNA, GUILayout.Width(50));
+                    GUILayout.EndHorizontal();
+                }
 
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Argument of Periapsis (degrees): ");
@@ -171,6 +204,119 @@ namespace RP0
             GUILayout.EndVertical();
             CheckEditorLock();
             CenterWindow(ref _simulationConfigPosition);
+        }
+
+        /// <summary>
+        /// The reentry half of the simulation config: describe the arriving trajectory rather than a
+        /// parking orbit, and show what that actually means at the entry interface.
+        /// </summary>
+        private static void DrawReentryConfig(CelestialBody body)
+        {
+            if (string.IsNullOrEmpty(_sEntryAlt))
+                _sEntryAlt = (GetDefaultEntryAltitude(body) / 1000d).ToString("F0");
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent("Periapsis (km): ", "Target periapsis of the arriving trajectory. This is the entry corridor setting; it may be inside the atmosphere or negative."));
+            _sOrbitPe = GUILayout.TextField(_sOrbitPe, GUILayout.Width(100));
+            GUILayout.EndHorizontal();
+
+            bool wasHyperbolic = _hyperbolicArrival;
+            _hyperbolicArrival = GUILayout.Toggle(_hyperbolicArrival, new GUIContent(" Hyperbolic arrival",
+                "Arriving faster than escape velocity, as on a lunar or interplanetary return. Set the excess speed instead of an apoapsis."));
+            if (_hyperbolicArrival != wasHyperbolic)
+                _simulationConfigPosition.height = 1;
+
+            GUILayout.BeginHorizontal();
+            if (_hyperbolicArrival)
+            {
+                GUILayout.Label(new GUIContent("Excess speed (m/s): ", "Hyperbolic excess speed (v-infinity) of the arrival. A lunar return to Earth is roughly 1100 m/s."));
+                _sVInf = GUILayout.TextField(_sVInf, GUILayout.Width(100));
+            }
+            else
+            {
+                GUILayout.Label(new GUIContent("Apoapsis (km): ", "Apoapsis of the arriving orbit. Unlike a parking orbit this is not clamped to the sphere of influence."));
+                _sOrbitAp = GUILayout.TextField(_sOrbitAp, GUILayout.Width(100));
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent("Entry interface (km): ", "Altitude the vessel is dropped onto, on the inbound leg."));
+            _sEntryAlt = GUILayout.TextField(_sEntryAlt, GUILayout.Width(100));
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent("Lead time (s): ", "Coast this long before reaching the entry interface, to set attitude first."));
+            _sLeadTime = GUILayout.TextField(_sLeadTime, GUILayout.Width(100));
+            GUILayout.EndHorizontal();
+
+            _logReentryTelemetry = GUILayout.Toggle(_logReentryTelemetry, new GUIContent(" Log thermal telemetry",
+                "Write per-tick heating data to a CSV in the save folder, for comparing a real entry against a predicted one."));
+
+            // Live preview, so the player can see what the numbers they typed actually produce.
+            var entry = default(SimReentryUtils.EntryState);
+            bool ok = TryParseReentryInputs(out double peAlt, out double apAlt, out double vInf,
+                                            out double entryAlt, out double leadTime, out string problem);
+            if (ok)
+                ok = SimReentryUtils.TryComputeEntry(body, peAlt, apAlt, vInf, entryAlt, leadTime, out entry, out problem);
+
+            if (ok)
+            {
+                string conic = entry.Ecc < 1d ? "elliptical" : "hyperbolic";
+                GUILayout.Label($"Entry: {entry.EntrySpeed:N0} m/s at {entry.EntryFPA:N2} deg FPA");
+                GUILayout.Label($"{conic}, e={entry.Ecc:N4}, starts at {entry.SpawnAltitude / 1000d:N0} km");
+            }
+            else
+            {
+                GUILayout.Label(problem ?? "Invalid reentry setup");
+            }
+        }
+
+        /// <summary>Parses the reentry text fields. Returns false, with a reason, if any of them is unusable.</summary>
+        private static bool TryParseReentryInputs(out double peAlt, out double apAlt, out double vInf,
+                                                  out double entryAlt, out double leadTime, out string error)
+        {
+            peAlt = apAlt = vInf = entryAlt = leadTime = 0d;
+            error = null;
+
+            if (!double.TryParse(_sOrbitPe, out peAlt))
+            {
+                error = "Enter a periapsis.";
+                return false;
+            }
+            peAlt *= 1000d;
+
+            if (_hyperbolicArrival)
+            {
+                if (!double.TryParse(_sVInf, out vInf) || vInf <= 0d)
+                {
+                    error = "Enter a positive excess speed.";
+                    return false;
+                }
+            }
+            else
+            {
+                if (!double.TryParse(_sOrbitAp, out apAlt))
+                {
+                    error = "Enter an apoapsis.";
+                    return false;
+                }
+                apAlt *= 1000d;
+            }
+
+            if (!double.TryParse(_sEntryAlt, out entryAlt))
+            {
+                error = "Enter an entry interface altitude.";
+                return false;
+            }
+            entryAlt *= 1000d;
+
+            if (!double.TryParse(_sLeadTime, out leadTime) || leadTime < 0d)
+            {
+                error = "Enter a non-negative lead time.";
+                return false;
+            }
+
+            return true;
         }
 
         public static void DrawBodyChooser(int windowID)
@@ -267,29 +413,58 @@ namespace RP0
             if (body != Planetarium.fetch.Home)
                 simParams.SimulateInOrbit = true;
 
+            simParams.SimulateReentry = simParams.SimulateInOrbit && _reentryMode && body.atmosphere;
+
             if (simParams.SimulateInOrbit)
             {
-                if (_circOrbit)
+                if (simParams.SimulateReentry)
                 {
-                    if (!double.TryParse(_sOrbitAlt, out simParams.SimOrbitAltitude))
-                        simParams.SimOrbitAltitude = GetDefaultAltitudeForBody(body);
-                    else
-                        simParams.SimOrbitAltitude = EnsureSafeMaxAltitude(1000 * simParams.SimOrbitAltitude, body);
+                    if (!TryParseReentryInputs(out double peAlt, out double apAlt, out double vInf,
+                                               out double entryAlt, out double leadTime, out string parseError))
+                    {
+                        ScreenMessages.PostScreenMessage(new ScreenMessage(parseError, 6f, ScreenMessageStyle.UPPER_CENTER));
+                        return;
+                    }
 
-                    simParams.SimOrbitPe = simParams.SimOrbitAp = 0;
+                    if (!SimReentryUtils.TryComputeEntry(body, peAlt, apAlt, vInf, entryAlt, leadTime, out _, out string entryError))
+                    {
+                        ScreenMessages.PostScreenMessage(new ScreenMessage($"Cannot simulate that reentry: {entryError}", 6f, ScreenMessageStyle.UPPER_CENTER));
+                        return;
+                    }
+
+                    // Deliberately unclamped: a periapsis inside the atmosphere is the whole point of this mode.
+                    simParams.SimOrbitPe = peAlt;
+                    simParams.SimOrbitAp = apAlt;
+                    simParams.SimEntryVInf = vInf;
+                    simParams.SimEntryAltitude = entryAlt;
+                    simParams.SimEntryLeadTime = leadTime;
+                    simParams.SimOrbitAltitude = 0;
+                    simParams.LogReentryTelemetry = _logReentryTelemetry;
                 }
                 else
                 {
-                    if (!double.TryParse(_sOrbitPe, out simParams.SimOrbitPe))
-                        simParams.SimOrbitPe = GetDefaultAltitudeForBody(body);
+                    if (_circOrbit)
+                    {
+                        if (!double.TryParse(_sOrbitAlt, out simParams.SimOrbitAltitude))
+                            simParams.SimOrbitAltitude = GetDefaultAltitudeForBody(body);
+                        else
+                            simParams.SimOrbitAltitude = EnsureSafeMaxAltitude(1000 * simParams.SimOrbitAltitude, body);
 
-                    if (!double.TryParse(_sOrbitAp, out simParams.SimOrbitAp))
-                        simParams.SimOrbitAp = GetDefaultAltitudeForBody(body);
+                        simParams.SimOrbitPe = simParams.SimOrbitAp = 0;
+                    }
+                    else
+                    {
+                        if (!double.TryParse(_sOrbitPe, out simParams.SimOrbitPe))
+                            simParams.SimOrbitPe = GetDefaultAltitudeForBody(body);
 
-                    simParams.SimOrbitAp = EnsureSafeMaxAltitude(1000 * simParams.SimOrbitAp, body);
-                    simParams.SimOrbitPe = Math.Min(1000 * simParams.SimOrbitPe, simParams.SimOrbitAp);
+                        if (!double.TryParse(_sOrbitAp, out simParams.SimOrbitAp))
+                            simParams.SimOrbitAp = GetDefaultAltitudeForBody(body);
 
-                    simParams.SimOrbitAltitude = 0;
+                        simParams.SimOrbitAp = EnsureSafeMaxAltitude(1000 * simParams.SimOrbitAp, body);
+                        simParams.SimOrbitPe = Math.Min(1000 * simParams.SimOrbitPe, simParams.SimOrbitAp);
+
+                        simParams.SimOrbitAltitude = 0;
+                    }
                 }
 
                 if (!double.TryParse(_sOrbitInc, out simParams.SimInclination))
@@ -410,6 +585,12 @@ namespace RP0
         private static double GetDefaultAltitudeForBody(CelestialBody body)
         {
             return body.atmosphere ? body.atmosphereDepth + 30000 : 30000;
+        }
+
+        /// <summary>The top of the atmosphere is the natural entry interface; above it nothing happens.</summary>
+        private static double GetDefaultEntryAltitude(CelestialBody body)
+        {
+            return body.atmosphere ? body.atmosphereDepth + SimReentryUtils.DefaultEntryAltitudeMargin : 0d;
         }
     }
 }
